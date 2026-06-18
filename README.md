@@ -1,10 +1,10 @@
-# EarlyHand
+# Kusoma
+
+*Kusoma* means **to study** in Swahili — fitting for a tool that watches how learners are doing, not just whether they passed.
 
 **Catching the quiet signs of struggle in scholarship and training cohorts — before a dropout, not after.**
 
-By the time a learner formally fails or vanishes from a program, they've usually checked out weeks earlier — informally, in plain sight, inside the cohort's own Slack. EarlyHand reads that signal continuously: who's stuck on the same concept repeatedly, who's quietly gone silent against their own baseline, who's showing overload language unrelated to coursework, who's lost confidence rather than knowledge, who's isolated despite being on track. It fuses that with where each learner actually stands in the curriculum (via MCP into a shared tracking sheet), and sends one clear, specific, non-punitive nudge to a coordinator or mentor: **who**, **what kind of struggle**, **what to do about it** — early enough to actually help.
-
-> **Repo name:** `kusoma` — the Slack Bolt app scaffold. **Product name:** EarlyHand.
+By the time a learner formally fails or vanishes from a program, they've usually checked out weeks earlier — informally, in plain sight, inside the cohort's own Slack. Kusoma reads that signal continuously: who's stuck on the same concept repeatedly, who's quietly gone silent against their own baseline, who's showing overload language unrelated to coursework, who's lost confidence rather than knowledge, who's isolated despite being on track. It fuses that with where each learner actually stands in the curriculum (via MCP into a shared tracking sheet), and sends one clear, specific, non-punitive nudge to a coordinator or mentor: **who**, **what kind of struggle**, **what to do about it** — early enough to actually help.
 
 ---
 
@@ -25,9 +25,9 @@ By the time a learner formally fails or vanishes from a program, they've usually
 
 ## Why this wins
 
-| Judging lens | How EarlyHand addresses it |
+| Judging lens | How Kusoma addresses it |
 |---|---|
-| **Quality of idea** | Dropout research splits causes into demographic, course-related, technology, motivational, and support factors. LMS dashboards and generic engagement bots detect at most one branch. EarlyHand's **five-signal taxonomy** (academic, overload, confidence, isolation, withdrawal) is the differentiator. |
+| **Quality of idea** | Dropout research splits causes into demographic, course-related, technology, motivational, and support factors. LMS dashboards and generic engagement bots detect at most one branch. Kusoma's **five-signal taxonomy** (academic, overload, confidence, isolation, withdrawal) is the differentiator. |
 | **Potential impact** | Scholarship and training programs lose learners — and funders lose confidence — for reasons visible in chat logs **weeks** before any formal record shows it. |
 | **Technological implementation** | Uses two required technologies **meaningfully**: **RTS** for in-workspace pattern detection, **MCP** for external curriculum tracking — not bolted on superficially. |
 | **Design** | One calm Slack DM to a coordinator. Never punitive. Never a public flag. Restraint is the right UX for privacy-sensitive subject matter. |
@@ -36,7 +36,7 @@ By the time a learner formally fails or vanishes from a program, they've usually
 
 ## Architecture at a glance
 
-![EarlyHand pipeline](docs/architecture-pipeline.png)
+![Kusoma pipeline](docs/architecture-pipeline.png)
 
 ```mermaid
 flowchart TB
@@ -163,7 +163,7 @@ graph LR
 
     subgraph AGENT["Agent layer"]
         SDK["Claude Agent SDK<br/><i>agent/agent.py</i>"]
-        KUSOMA["EarlyHand logic<br/><i>agent/kusoma.py</i>"]
+        KUSOMA["Kusoma logic<br/><i>agent/kusoma.py</i>"]
         TOOLS["SDK tools<br/><i>agent/tools/</i>"]
     end
 
@@ -183,10 +183,10 @@ graph LR
     BOLT --> RTS2
 ```
 
-| Technology | Role in EarlyHand | Current state |
+| Technology | Role in Kusoma | Current state |
 |---|---|---|
 | **Bolt for Python** | App entry point, event listeners, Socket Mode connection to sandbox workspace | Scaffold running via `slack run` |
-| **Claude Agent SDK** | Conversational agent layer (`agent/agent.py`) — emoji reactions, Slack MCP tools | Template agent active; not yet the EarlyHand pipeline |
+| **Claude Agent SDK** | Conversational agent layer (`agent/agent.py`) — emoji reactions, Slack MCP tools | Template agent active; not yet the Kusoma pipeline |
 | **Anthropic API** | Powers `classify_message()` — prompt-based classifier, not custom ML | Logic written; `ANTHROPIC_API_KEY` in `.env` |
 | **Slack RTS** | Reads public cohort channel messages for pattern detection across time | Interface stubbed in `fetch_recent_messages()` |
 | **Curriculum MCP** | Read-only access to `cohort_tracker` + `mentor_strengths` sheets | Interface stubbed; schema documented |
@@ -199,7 +199,7 @@ The scaffold ships with **two separate modules** that will merge:
 | Module | Purpose | Status |
 |---|---|---|
 | `agent/agent.py` | Slack's Claude Agent SDK — handles DMs, @mentions, assistant panel | Working (template "friendly assistant") |
-| `agent/kusoma.py` | EarlyHand pipeline — classify → fuse → route | Core logic complete, not connected to Bolt listeners yet |
+| `agent/kusoma.py` | Kusoma pipeline — classify → fuse → route | Core logic complete, not connected to Bolt listeners yet |
 
 The hackathon integration work is wiring `agent/kusoma.py` into a Bolt listener (likely a scheduled job or channel message event) and replacing the template system prompt in `agent/agent.py` when appropriate.
 
@@ -293,7 +293,7 @@ kusoma/
 │
 ├── agent/
 │   ├── agent.py                # Claude Agent SDK agent (template — conversational)
-│   ├── kusoma.py               # EarlyHand core: classify → fuse → route
+│   ├── kusoma.py               # Kusoma core: classify → fuse → route
 │   ├── deps.py                 # Runtime deps (Slack client, channel, thread)
 │   └── tools/                  # SDK tools (emoji reaction template)
 │
@@ -358,7 +358,7 @@ slack run
 pytest tests/ -v
 ```
 
-Expected: **18 passed** (13 EarlyHand routing + 5 scaffold).
+Expected: **18 passed** (13 Kusoma routing + 5 scaffold).
 
 ---
 
@@ -366,7 +366,7 @@ Expected: **18 passed** (13 EarlyHand routing + 5 scaffold).
 
 | Time | Show | Say |
 |---|---|---|
-| 0:00 | Architecture diagram (`docs/architecture-pipeline.png`) | "Learners struggle in Slack weeks before any formal record. EarlyHand reads that signal." |
+| 0:00 | Architecture diagram (`docs/architecture-pipeline.png`) | "Learners struggle in Slack weeks before any formal record. Kusoma reads that signal." |
 | 0:30 | Seed data — post as Aida in `#module-help` | "Aida asks about closures twice, is behind on the curriculum sheet." |
 | 1:00 | Classifier output (JSON) | "Classifier returns academic, high confidence — not a generic flag." |
 | 1:30 | Routing result | "Fusion sees she's behind → routes to Sam, the mentor who's helped with closures before." |
