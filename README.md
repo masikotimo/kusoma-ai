@@ -1,309 +1,394 @@
-# Starter Agent for Slack (Bolt for Python and Claude Agent SDK)
+# EarlyHand
 
-A minimal starter template for building AI-powered Slack agents with [Bolt for Python](https://docs.slack.dev/tools/bolt-python/) and the [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview) using models from [Anthropic](https://www.anthropic.com). Works with the [Slack MCP Server](https://github.com/slackapi/slack-mcp-server) to search messages, read channels, send messages, and manage canvases — all from within your agent.
+**Catching the quiet signs of struggle in scholarship and training cohorts — before a dropout, not after.**
 
-## App Overview
+By the time a learner formally fails or vanishes from a program, they've usually checked out weeks earlier — informally, in plain sight, inside the cohort's own Slack. EarlyHand reads that signal continuously: who's stuck on the same concept repeatedly, who's quietly gone silent against their own baseline, who's showing overload language unrelated to coursework, who's lost confidence rather than knowledge, who's isolated despite being on track. It fuses that with where each learner actually stands in the curriculum (via MCP into a shared tracking sheet), and sends one clear, specific, non-punitive nudge to a coordinator or mentor: **who**, **what kind of struggle**, **what to do about it** — early enough to actually help.
 
-The starter agent interacts with users through four entry points:
+> **Repo name:** `kusoma` — the Slack Bolt app scaffold. **Product name:** EarlyHand.
 
-* **App Home** — Displays a welcome message with instructions on how to interact.
-* **Direct Messages** — Users message the agent directly. It responds in-thread, maintaining context across follow-ups.
-* **Channel @mentions** — Mention the agent in any channel to get a response without leaving the conversation.
-* **Assistant Panel** — Users click _Add Agent_ in Slack, select the agent, and pick from suggested prompts or type a message.
+---
 
-The template also includes one example tool (emoji reactions). Add your own tools to customize it for your use case.
+## Table of contents
 
-### Slack MCP Server
+1. [Why this wins](#why-this-wins)
+2. [Architecture at a glance](#architecture-at-a-glance)
+3. [How data flows end-to-end](#how-data-flows-end-to-end)
+4. [Technologies and where they connect](#technologies-and-where-they-connect)
+5. [Demo scenarios](#demo-scenarios-touch-points)
+6. [What's built vs what's left](#whats-built-vs-whats-left)
+7. [Project structure](#project-structure)
+8. [Run locally](#run-locally)
+9. [Demo script](#demo-script-3-minutes)
+10. [Further reading](#further-reading)
 
-When connected to the [Slack MCP Server](https://github.com/slackapi/slack-mcp-server), the agent can search messages and files, read channel history and threads, send and schedule messages, and create and update canvases. When deployed with OAuth (HTTP mode), the agent automatically connects to the Slack MCP Server using the user's token.
+---
 
-## Setup
+## Why this wins
 
-Before getting started, make sure you have a development workspace where you have permissions to install apps.
+| Judging lens | How EarlyHand addresses it |
+|---|---|
+| **Quality of idea** | Dropout research splits causes into demographic, course-related, technology, motivational, and support factors. LMS dashboards and generic engagement bots detect at most one branch. EarlyHand's **five-signal taxonomy** (academic, overload, confidence, isolation, withdrawal) is the differentiator. |
+| **Potential impact** | Scholarship and training programs lose learners — and funders lose confidence — for reasons visible in chat logs **weeks** before any formal record shows it. |
+| **Technological implementation** | Uses two required technologies **meaningfully**: **RTS** for in-workspace pattern detection, **MCP** for external curriculum tracking — not bolted on superficially. |
+| **Design** | One calm Slack DM to a coordinator. Never punitive. Never a public flag. Restraint is the right UX for privacy-sensitive subject matter. |
 
-### Developer Program
+---
 
-Join the [Slack Developer Program](https://api.slack.com/developer-program) for exclusive access to sandbox environments for building and testing your apps, tooling, and resources created to help you build and grow.
+## Architecture at a glance
 
-### Create the Slack app
+![EarlyHand pipeline](docs/architecture-pipeline.png)
 
-<details><summary><strong>Using Slack CLI</strong></summary>
+```mermaid
+flowchart TB
+    subgraph INPUT["① Data input"]
+        CH["Cohort Slack channels<br/><i>#general · #module-help · #standup</i>"]
+        RTS["Slack Real-Time Search API"]
+        CH --> RTS
+    end
 
-Install the latest version of the Slack CLI for your operating system:
+    subgraph CLASSIFY["② Signal classifier"]
+        CL["Claude classifier<br/><i>classifier_system_prompt.md</i>"]
+        RTS -->|"last N messages per learner"| CL
+    end
 
-- [Slack CLI for macOS & Linux](https://docs.slack.dev/tools/slack-cli/guides/installing-the-slack-cli-for-mac-and-linux/)
-- [Slack CLI for Windows](https://docs.slack.dev/tools/slack-cli/guides/installing-the-slack-cli-for-windows/)
+    subgraph SIGNALS["③ Five risk types"]
+        AC["Academic<br/><i>repeated confusion</i>"]
+        OL["Overload<br/><i>time / life pressure</i>"]
+        CF["Confidence<br/><i>not cut out for this</i>"]
+        IS["Isolation<br/><i>on track, disengaged</i>"]
+        WD["Withdrawal<br/><i>stopped reaching out</i>"]
+        CL --> AC & OL & CF & IS & WD
+    end
 
-You'll also need to log in if this is your first time using the Slack CLI.
+    subgraph MCP["④ Curriculum MCP"]
+        SHEET["cohort_tracker sheet<br/><i>module position, mentor, coordinator</i>"]
+        MENTOR["mentor_strengths sheet<br/><i>topic → best mentor</i>"]
+    end
 
-```sh
-slack login
+    subgraph FUSION["⑤ Fusion & routing"]
+        GATE["should_escalate()"]
+        ROUTE["route()"]
+        AC & OL & CF & IS & WD --> GATE
+        SHEET & MENTOR --> GATE
+        GATE --> ROUTE
+    end
+
+    subgraph OUTPUT["⑥ Action in Slack"]
+        MN["Mentor nudge DM<br/><i>specific topic, specific mentor</i>"]
+        CO["Coordinator check-in DM<br/><i>human, personal outreach</i>"]
+        ROUTE -->|"academic only"| MN
+        ROUTE -->|"overload · confidence · isolation · withdrawal"| CO
+    end
+
+    style INPUT fill:#2d3748,color:#fff
+    style CLASSIFY fill:#2b6cb0,color:#fff
+    style SIGNALS fill:#9b2c2c,color:#fff
+    style MCP fill:#2b6cb0,color:#fff
+    style FUSION fill:#c05621,color:#fff
+    style OUTPUT fill:#276749,color:#fff
 ```
 
-#### Initializing the project
+**Design principle:** output always goes to a **human** (mentor or coordinator). The learner is never publicly flagged. The system recommends; humans decide.
 
-```sh
-slack create my-starter-agent --template slack-samples/bolt-python-starter-agent --subdir claude-agent-sdk
-cd my-starter-agent
+---
+
+## How data flows end-to-end
+
+This is the full path from a learner posting in `#module-help` to a coordinator receiving a DM.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant L as Learner (Slack)
+    participant CH as Cohort channel
+    participant B as Bolt app (app.py)
+    participant RTS as Slack RTS API
+    participant K as agent/kusoma.py
+    participant AI as Anthropic API
+    participant MCP as Curriculum MCP<br/>(Google Sheet)
+    participant R as Fusion & routing
+    participant DM as Coordinator / Mentor DM
+
+    L->>CH: Posts message in #module-help
+    Note over B: Scheduled or event-driven batch<br/>(not yet wired — see status table)
+
+    B->>RTS: fetch_recent_messages(channel, learner_id)
+    RTS-->>B: Last 10 messages + context window
+
+    B->>K: handle_message_batch(history, current_message)
+    K->>AI: classify_message() with classifier_system_prompt.md
+    AI-->>K: ClassificationResult<br/>{risk_types, confidence, reasoning}
+
+    K->>MCP: fetch_curriculum_row(learner_id)
+    MCP-->>K: CurriculumRow<br/>{current_module, expected_module, mentor, coordinator}
+
+    opt academic risk
+        K->>MCP: fetch_mentor_for_topic(topic)
+        MCP-->>K: Best-matched mentor
+    end
+
+    K->>R: should_escalate() → route()
+    R-->>K: RoutedAction or None
+
+    alt mentor path (academic only)
+        K->>DM: DM to assigned / topic-matched mentor
+    else coordinator path (everything else)
+        K->>DM: DM to coordinator
+    end
 ```
 
-</details>
+### Step-by-step (plain language)
 
-<details><summary><strong>Using App Settings</strong></summary>
+| Step | What happens | Code / doc |
+|---|---|---|
+| **1. Pick up chats** | App queries cohort public channels via **Slack RTS** for a rolling window of messages per learner (not just the latest line — withdrawal and isolation need history). | `fetch_recent_messages()` in `agent/kusoma.py` — **stub** |
+| **2. Classify** | Messages + history sent to Claude with a strict JSON-returning system prompt. Output: one or more of five risk types, confidence, reasoning. | `classify_message()` + `docs/classifier_system_prompt.md` — **logic ready, needs live wiring** |
+| **3. Curriculum lookup** | Given `learner_id`, read their row from the MCP-connected sheet: module position, assigned mentor, coordinator. | `fetch_curriculum_row()` — **stub**; schema in `docs/curriculum_mcp_schema.md` |
+| **4. Fuse** | Gate: don't escalate noise (e.g. Felix joking, low-confidence academic while on track). Combine classifier output with curriculum standing. | `should_escalate()` — **done, tested** |
+| **5. Route** | Academic → topic-matched **mentor**. Overload / confidence / isolation / withdrawal → **coordinator**. Multiple flags → one combined coordinator message. | `route()` — **done, tested** |
+| **6. Act in Slack** | Send a single private DM. Format: who, what struggle, suggested action. Never punitive. | **not wired** — needs Bolt `chat.postMessage` to mentor/coordinator |
 
-#### Create Your Slack App
+---
 
-1. Open [https://api.slack.com/apps/new](https://api.slack.com/apps/new) and choose "From an app manifest"
-2. Choose the workspace you want to install the application to
-3. Copy the contents of [manifest.json](./manifest.json) into the text box that says `*Paste your manifest code here*` (within the JSON tab) and click _Next_
-4. Review the configuration and click _Create_
-5. Click _Install to Workspace_ and _Allow_ on the screen that follows. You'll then be redirected to the App Configuration dashboard.
+## Technologies and where they connect
 
-#### Environment Variables
+```mermaid
+graph LR
+    subgraph SLACK["Slack Platform"]
+        BOLT["Bolt for Python<br/><i>app.py · listeners/</i>"]
+        RTS2["Real-Time Search API"]
+        SMCP["Slack MCP Server<br/><i>mcp.slack.com</i>"]
+        SOCKET["Socket Mode<br/><i>slack run</i>"]
+    end
 
-Before you can run the app, you'll need to store some environment variables.
+    subgraph AGENT["Agent layer"]
+        SDK["Claude Agent SDK<br/><i>agent/agent.py</i>"]
+        KUSOMA["EarlyHand logic<br/><i>agent/kusoma.py</i>"]
+        TOOLS["SDK tools<br/><i>agent/tools/</i>"]
+    end
 
-1. Rename `.env.sample` to `.env`.
-2. Open your apps setting page from [this list](https://api.slack.com/apps), click _OAuth & Permissions_ in the left hand menu, then copy the _Bot User OAuth Token_ into your `.env` file under `SLACK_BOT_TOKEN`.
+    subgraph EXTERNAL["External"]
+        ANTH["Anthropic API"]
+        GSHEET["Google Sheet / Airtable<br/><i>via MCP</i>"]
+    end
 
-```sh
-SLACK_BOT_TOKEN=YOUR_SLACK_BOT_TOKEN
+    SOCKET --> BOLT
+    BOLT --> SDK
+    BOLT --> KUSOMA
+    SDK --> ANTH
+    SDK --> SMCP
+    KUSOMA --> ANTH
+    KUSOMA --> RTS2
+    KUSOMA --> GSHEET
+    BOLT --> RTS2
 ```
 
-3. Click _Basic Information_ from the left hand menu and follow the steps in the _App-Level Tokens_ section to create an app-level token with the `connections:write` scope. Copy that token into your `.env` as `SLACK_APP_TOKEN`.
+| Technology | Role in EarlyHand | Current state |
+|---|---|---|
+| **Bolt for Python** | App entry point, event listeners, Socket Mode connection to sandbox workspace | Scaffold running via `slack run` |
+| **Claude Agent SDK** | Conversational agent layer (`agent/agent.py`) — emoji reactions, Slack MCP tools | Template agent active; not yet the EarlyHand pipeline |
+| **Anthropic API** | Powers `classify_message()` — prompt-based classifier, not custom ML | Logic written; `ANTHROPIC_API_KEY` in `.env` |
+| **Slack RTS** | Reads public cohort channel messages for pattern detection across time | Interface stubbed in `fetch_recent_messages()` |
+| **Curriculum MCP** | Read-only access to `cohort_tracker` + `mentor_strengths` sheets | Interface stubbed; schema documented |
+| **Slack MCP Server** | Optional: search channels, read history, send messages from the SDK agent | Available when user OAuth token present |
 
-```sh
-SLACK_APP_TOKEN=YOUR_SLACK_APP_TOKEN
+### Two agent layers (important)
+
+The scaffold ships with **two separate modules** that will merge:
+
+| Module | Purpose | Status |
+|---|---|---|
+| `agent/agent.py` | Slack's Claude Agent SDK — handles DMs, @mentions, assistant panel | Working (template "friendly assistant") |
+| `agent/kusoma.py` | EarlyHand pipeline — classify → fuse → route | Core logic complete, not connected to Bolt listeners yet |
+
+The hackathon integration work is wiring `agent/kusoma.py` into a Bolt listener (likely a scheduled job or channel message event) and replacing the template system prompt in `agent/agent.py` when appropriate.
+
+---
+
+## Demo scenarios (touch points)
+
+Six seeded personas in `docs/seed_cohort_data.md`. Each exercises exactly one risk path (plus Felix as a no-signal control).
+
+| Persona | Risk type | Curriculum | Expected route | Demo moment |
+|---|---|---|---|---|
+| **Felix** | *(none)* | On track (4/4) | No action | "System stays quiet on normal venting" |
+| **Aida** | Academic | Behind (2/4) | Mentor **Sam** (closures) | Repeated confusion + behind on sheet |
+| **Brian** | Overload | Slightly behind (3/4) | Coordinator **Jane** | Life pressure, not content confusion |
+| **Carmen** | Confidence | On track (4/4) | Coordinator **Jane** | Self-doubt despite being on track |
+| **Daniel** | Isolation | On track (4/4) | Coordinator **Jane** | Submitting but socially disengaged |
+| **Esther** | Withdrawal | Behind + stale (2/4) | Coordinator **Jane** | Was active, now silent vs own baseline |
+
+### What each demo path proves
+
+```
+Felix  →  classifier discriminates (no false positives)
+Aida   →  academic + curriculum lag → mentor, not coordinator
+Brian  →  overload ≠ academic (different routing)
+Carmen →  confidence independent of module position
+Daniel →  isolation fires even when on track (the counterintuitive case)
+Esther →  withdrawal needs history, not a single message
 ```
 
-#### Initializing the project
+### Coordinator DM format (target output)
 
-```sh
-git clone https://github.com/slack-samples/bolt-python-starter-agent.git my-starter-agent
-cd my-starter-agent
+Every routed action ends as **one private message** like:
+
+> **Aida K.** has asked about **closures** more than once and is currently on module **2** vs an expected **4**. You've helped others with this before — might be worth a quick check-in.
+>
+> → Route to: **@sam** (mentor)
+
+or
+
+> **Carmen R.** has expressed self-doubt comparing themselves to peers. Worth noting: they're actually **on track** (4/4) — this looks like a confidence gap, not a skills gap.
+>
+> → Route to: **@jane** (coordinator)
+
+---
+
+## What's built vs what's left
+
+### Built and tested
+
+| Component | Location | Verification |
+|---|---|---|
+| Classifier system prompt (5 risk types) | `docs/classifier_system_prompt.md` | Manual trace in `docs/manual_classification_trace.md` |
+| Fusion gate logic | `agent/kusoma.py` → `should_escalate()` | 13 pytest cases pass |
+| Routing logic (mentor vs coordinator) | `agent/kusoma.py` → `route()` | All 6 personas covered in `tests/test_kusoma_routing.py` |
+| Cohort pattern check | `agent/kusoma.py` → `check_cohort_pattern()` | Tested (2+ learners same topic → group session suggestion) |
+| Seed persona data | `docs/seed_cohort_data.md` | 6 personas with expected outcomes |
+| Curriculum MCP schema | `docs/curriculum_mcp_schema.md` | Sample rows for all personas |
+| End-to-end traces | `docs/end_to_end_trace.md` | Aida + Daniel walked through |
+| Bolt scaffold + Socket Mode | `app.py`, `.slack/`, `manifest.json` | `slack run` connects to sandbox |
+| Scaffold tests | `tests/` | 18/18 passing |
+
+### Stubbed (interface defined, not wired)
+
+| Component | Function | Next step |
+|---|---|---|
+| **RTS message fetch** | `fetch_recent_messages()` | Call Slack RTS API scoped to `#general`, `#module-help`, `#standup`; return last N messages per learner |
+| **Curriculum MCP read** | `fetch_curriculum_row()` | Connect Google Sheet MCP; map row → `CurriculumRow` |
+| **Mentor topic lookup** | `fetch_mentor_for_topic()` | Read `mentor_strengths` sheet; sort by `times_successfully_explained` |
+| **Pipeline orchestration** | `handle_message_batch()` | Called from a Bolt listener once steps above are wired |
+| **Slack DM output** | *(not yet a function)* | `chat.postMessage` to mentor or coordinator user ID from curriculum row |
+
+### Not started
+
+| Task | Notes |
+|---|---|
+| Seed fake Slack workspace | Create channels, post scripted persona messages across 3 "weeks" |
+| Bolt listener for ambient monitoring | Currently responds only to DMs and @mentions — needs channel-level or scheduled batch trigger |
+| Live classifier smoke test | Script calling `classify_message()` with real API key against Aida + Carmen |
+| Google Sheet + MCP server setup | Stand up `cohort_tracker` and `mentor_strengths` per schema |
+| Demo recording | 3-minute video showing 2–3 personas firing different paths |
+
+---
+
+## Project structure
+
+```
+kusoma/
+├── app.py                      # Bolt entry point (Socket Mode)
+├── manifest.json               # Slack app config
+├── .env                        # SLACK_BOT_TOKEN, SLACK_APP_TOKEN, ANTHROPIC_API_KEY
+│
+├── agent/
+│   ├── agent.py                # Claude Agent SDK agent (template — conversational)
+│   ├── kusoma.py               # EarlyHand core: classify → fuse → route
+│   ├── deps.py                 # Runtime deps (Slack client, channel, thread)
+│   └── tools/                  # SDK tools (emoji reaction template)
+│
+├── listeners/
+│   ├── events/                 # message.py, app_mentioned.py, app_home_opened.py
+│   ├── actions/                # feedback buttons
+│   └── views/                  # Block Kit builders
+│
+├── docs/                       # Design docs + runtime prompt
+│   ├── architecture-pipeline.png
+│   ├── classifier_system_prompt.md   ← loaded at runtime by kusoma.py
+│   ├── curriculum_mcp_schema.md
+│   ├── fusion_routing_logic.md
+│   ├── seed_cohort_data.md
+│   ├── end_to_end_trace.md
+│   └── manual_classification_trace.md
+│
+├── tests/
+│   ├── test_kusoma_routing.py  # 13 routing tests (no API needed)
+│   ├── test_app_home_opened.py
+│   └── test_view_builders.py
+│
+└── thread_context/             # Session store for conversational agent
 ```
 
-</details>
+---
 
-### Setup your python virtual environment
+## Run locally
+
+### Prerequisites
+
+- Slack Developer Program sandbox workspace
+- `slack login` completed
+- Python 3.12+
+
+### Setup
 
 ```sh
+cd kusoma
 python3 -m venv .venv
-source .venv/bin/activate  # for Windows OS, .\.venv\Scripts\Activate instead should work
-```
-
-#### Install dependencies
-
-```sh
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Providers
-
-### Anthropic Setup
-
-This app uses Claude through the Claude Agent SDK.
-
-1. Create an API key from your [Anthropic dashboard](https://console.anthropic.com/settings/keys).
-1. Rename `.env.sample` to `.env`.
-3. Save the Anthropic API key to `.env`:
+Add to `.env`:
 
 ```sh
-ANTHROPIC_API_KEY=YOUR_ANTHROPIC_API_KEY
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_APP_TOKEN=xapp-...
+ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-## Development
-
-### Starting the app
-
-<details><summary><strong>Using the Slack CLI</strong></summary>
-
-#### Slack CLI
+### Start the app
 
 ```sh
 slack run
 ```
-</details>
 
-<details><summary><strong>Using the Terminal</strong></summary>
-
-#### Terminal
+### Run tests (no Slack or API needed for routing)
 
 ```sh
-python3 app.py
+pytest tests/ -v
 ```
 
-</details>
+Expected: **18 passed** (13 EarlyHand routing + 5 scaffold).
 
-<details><summary><strong>Using OAuth HTTP Server (with ngrok)</strong></summary>
+---
 
-#### OAuth HTTP Server
+## Demo script (3 minutes)
 
-This mode uses an HTTP server instead of Socket Mode, which is required for OAuth-based distribution.
+| Time | Show | Say |
+|---|---|---|
+| 0:00 | Architecture diagram (`docs/architecture-pipeline.png`) | "Learners struggle in Slack weeks before any formal record. EarlyHand reads that signal." |
+| 0:30 | Seed data — post as Aida in `#module-help` | "Aida asks about closures twice, is behind on the curriculum sheet." |
+| 1:00 | Classifier output (JSON) | "Classifier returns academic, high confidence — not a generic flag." |
+| 1:30 | Routing result | "Fusion sees she's behind → routes to Sam, the mentor who's helped with closures before." |
+| 2:00 | Switch persona — Carmen or Daniel | "Different risk type, different route. Carmen's on track but losing confidence → coordinator, not mentor." |
+| 2:30 | Coordinator DM | "One calm message. Who, what struggle, what to do. Never public. Never punitive." |
+| 3:00 | Felix (no signal) | "And when there's nothing to act on, the system stays quiet." |
 
-1. Install [ngrok](https://ngrok.com/download) and start a tunnel:
+---
 
-```sh
-ngrok http 3000
-```
+## Further reading
 
-2. Copy the `https://*.ngrok-free.app` URL from the ngrok output.
+| Doc | Contents |
+|---|---|
+| [`docs/classifier_system_prompt.md`](docs/classifier_system_prompt.md) | Full classifier prompt — five risk types, baseline rules, JSON output schema |
+| [`docs/seed_cohort_data.md`](docs/seed_cohort_data.md) | Six persona message histories for demo seeding |
+| [`docs/fusion_routing_logic.md`](docs/fusion_routing_logic.md) | Gate rules, mentor vs coordinator paths, multi-flag merging |
+| [`docs/curriculum_mcp_schema.md`](docs/curriculum_mcp_schema.md) | Google Sheet columns, sample rows, MCP read pattern |
+| [`docs/end_to_end_trace.md`](docs/end_to_end_trace.md) | Full Aida + Daniel walkthroughs |
+| [`docs/manual_classification_trace.md`](docs/manual_classification_trace.md) | Hand-verified classifier discrimination per persona |
 
-<details><summary><strong>Using Slack CLI</strong></summary>
+---
 
-#### Slack CLI
+## License
 
-3. Update `manifest.json` for HTTP mode:
-   - Set `socket_mode_enabled` to `false`
-   - Replace `ngrok-free.app` with your ngrok domain (e.g. `YOUR_NGROK_SUBDOMAIN.ngrok-free.app`)
-
-4. Create a new local dev app:
-
-```sh
-slack install -E local
-```
-
-5. _(Slack CLI < v4.1.0 only)_ Enable MCP for your app:
-   - Run `slack app settings` to open your app's settings
-   - Navigate to **Agents & AI Apps** in the left-side navigation
-   - Toggle **Model Context Protocol** on
-
-6. Update your `.env` OAuth environment variables:
-   - Run `slack app settings` to open App Settings
-   - Copy **Client ID**, **Client Secret**, and **Signing Secret**
-   - Update `SLACK_REDIRECT_URI` in `.env` with your ngrok domain
-
-```sh
-SLACK_CLIENT_ID=YOUR_CLIENT_ID
-SLACK_CLIENT_SECRET=YOUR_CLIENT_SECRET
-SLACK_SIGNING_SECRET=YOUR_SIGNING_SECRET
-SLACK_REDIRECT_URI=https://YOUR_NGROK_SUBDOMAIN.ngrok-free.app/slack/oauth_redirect
-```
-
-7. Start the app:
-
-```sh
-slack run app_oauth.py
-```
-
-8. Click the install URL printed in the terminal to install the app to your workspace via OAuth.
-
-</details>
-
-<details><summary><strong>Using the Terminal</strong></summary>
-
-#### Terminal
-
-3. Create your Slack app at [api.slack.com/apps/new](https://api.slack.com/apps/new) using [`manifest.json`](./manifest.json). Before pasting the manifest, set `socket_mode_enabled` to `false` and replace `ngrok-free.app` with your ngrok domain.
-
-4. Install the app to your workspace and copy the following values into your `.env`:
-   - **Signing Secret** — from _Basic Information_
-   - **Bot User OAuth Token** — from _OAuth & Permissions_
-   - **Client ID** and **Client Secret** — from _Basic Information_
-
-```sh
-SLACK_BOT_TOKEN=xoxb-YOUR_BOT_TOKEN
-SLACK_CLIENT_ID=YOUR_CLIENT_ID
-SLACK_CLIENT_SECRET=YOUR_CLIENT_SECRET
-SLACK_SIGNING_SECRET=YOUR_SIGNING_SECRET
-SLACK_REDIRECT_URI=https://YOUR_NGROK_SUBDOMAIN.ngrok-free.app/slack/oauth_redirect
-```
-
-Replace `your-subdomain` in `SLACK_REDIRECT_URI` with your ngrok subdomain.
-
-5. Start the app:
-
-```sh
-python3 app_oauth.py
-```
-
-6. Click the install URL printed in the terminal to install the app to your workspace via OAuth.
-
-</details>
-
-> **Note:** Each time ngrok restarts, it generates a new URL. You'll need to update the ngrok domain in `manifest.json`, `SLACK_REDIRECT_URI` in your `.env`, and re-install the app.
-
-</details>
-
-### Using the App
-
-Once the agent is running, there are several ways to interact:
-
-**App Home** — Open the agent in Slack and click the _Home_ tab. You'll see a welcome message with instructions on how to interact.
-
-**Direct Messages** — Open a DM with the agent. You'll see suggested prompts like _Write a Message_, _Summarize_, and _Brainstorm_ — pick one or type your own message. The agent replies in a thread. Send follow-up messages in the same thread and the agent will maintain the full conversation context.
-
-**Channel @mentions** — Invite the agent to a channel by typing `/invite @agent-name` in the message box, then @mention it followed by your message. The agent responds in a thread so the channel stays clean.
-
-**Assistant Panel** — Click _Add Agent_ in the top-right corner of Slack, select the agent from the list, then pick a suggested prompt or type a message.
-
-### Linting
-
-```sh
-# Run ruff check from root directory for linting
-ruff check
-
-# Run ruff format from root directory for code formatting
-ruff format
-```
-
-## Project Structure
-
-### `manifest.json`
-
-`manifest.json` is a configuration for Slack apps. With a manifest, you can create an app with a pre-defined configuration, or adjust the configuration of an existing app.
-
-### `app.py`
-
-`app.py` is the entry point for the application and is the file you'll run to start the server. This project uses `AsyncApp` from Bolt for Python, with all handlers running asynchronously.
-
-### `app_oauth.py`
-
-`app_oauth.py` is an alternative entry point that runs the app in HTTP mode instead of Socket Mode. This is intended for deployments that use OAuth for app distribution. See the HTTP Mode section under Development for setup instructions.
-
-### `/listeners`
-
-Every incoming request is routed to a "listener". This directory groups each listener based on the Slack Platform feature used.
-
-**`/listeners/events`** — Handles incoming events:
-
-- `app_home_opened.py` — Publishes the App Home view with a welcome message and MCP status.
-- `app_mentioned.py` — Responds to @mentions in channels.
-- `message.py` — Responds to direct messages from users.
-
-**`/listeners/actions`** — Handles interactive components:
-
-- `feedback_buttons.py` — Handles thumbs up/down feedback on agent responses.
-
-**`/listeners/views`** — Builds Block Kit views:
-
-- `app_home_builder.py` — Constructs the App Home Block Kit view.
-- `feedback_builder.py` — Creates the feedback button block attached to responses.
-
-### `/agent`
-
-The `agent.py` file configures the Claude Agent SDK with a system prompt, tools registered via an MCP server, and a `run_agent()` async function that handles sending queries and collecting responses.
-
-The `deps.py` file defines the `AgentDeps` dataclass passed to the agent at runtime, providing access to the Slack client and conversation context.
-
-The `tools` directory contains one example tool (emoji reaction) defined using the `@tool` decorator from the Claude Agent SDK.
-
-### `/thread_context`
-
-The `store.py` file implements a thread-safe in-memory session ID store, keyed by channel and thread. The Claude Agent SDK manages conversation history server-side via sessions, so only session IDs need to be tracked locally for resuming conversations.
-
-## Troubleshooting
-
-### MCP Server connection error: `HTTP error 400 (Bad Request)`
-
-If you see an error like:
-
-```
-Failed to connect to MCP server 'streamable_http: https://mcp.slack.com/mcp': HTTP error 400 (Bad Request)
-```
-
-This means the Slack MCP feature has not been enabled for your app. There is no manifest property for this yet, so it must be toggled on manually:
-
-1. Run `slack app settings` to open your app's settings page (or visit [api.slack.com/apps](https://api.slack.com/apps) and select your app)
-2. Navigate to **Agents & AI Apps** in the left-side navigation
-3. Toggle **Slack Model Context Protocol** on
+See [LICENSE](LICENSE).
