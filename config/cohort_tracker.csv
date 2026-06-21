@@ -1,0 +1,5 @@
+learner_id,slack_user_id,display_name,cohort_start_date,expected_module,current_module,last_submission_date,prior_experience,assigned_mentor,coordinator
+aida,U0BBUA2QFC5,Aida K.,2026-05-01,4,2,2026-06-09,none,sam,jane
+brian,U0BBVKNLF0E,Brian O.,2026-05-01,4,3,2026-06-11,some,sam,jane
+carmen,U0BBXMWT2RY,Carmen R.,2026-05-01,4,4,2026-06-12,none,sam,jane
+esther,U0BCS0Q1S56,Esther N.,2026-05-01,4,2,2026-05-20,none,sam,jane

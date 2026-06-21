@@ -11,11 +11,13 @@ Reference docs (schemas, traces, seed data) are in docs/.
 """
 
 import json
-from dataclasses import dataclass, field
+import re
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import anthropic
+
+from agent.models import ClassificationResult, CurriculumRow, RoutedAction
 
 CLASSIFIER_MODEL = "claude-sonnet-4-6"
 
@@ -23,64 +25,39 @@ _DOCS_DIR = Path(__file__).resolve().parent.parent / "docs"
 CLASSIFIER_SYSTEM_PROMPT = (_DOCS_DIR / "classifier_system_prompt.md").read_text()
 
 
-# ---------------------------------------------------------------------------
-# Data shapes
-# ---------------------------------------------------------------------------
+def parse_classifier_response(text: str) -> dict[str, Any]:
+    """Extract the first JSON object from a classifier response."""
+    cleaned = text.strip()
 
-@dataclass
-class CurriculumRow:
-    learner_id: str
-    display_name: str
-    expected_module: int
-    current_module: int
-    last_submission_date: str
-    prior_experience: str
-    assigned_mentor: str
-    coordinator: str
+    fence = re.search(r"```(?:json)?\s*(\{.*)", cleaned, re.DOTALL)
+    if fence:
+        cleaned = fence.group(1).split("```", 1)[0].strip()
 
-    @property
-    def behind(self) -> bool:
-        return self.current_module < self.expected_module
+    start = cleaned.find("{")
+    if start == -1:
+        raise ValueError(f"No JSON object in classifier response: {text[:200]!r}")
+
+    obj, _ = json.JSONDecoder().raw_decode(cleaned[start:])
+    return obj
 
 
-@dataclass
-class ClassificationResult:
-    learner_id: str
-    message_excerpt: str
-    risk_types: list[str]
-    confidence: str  # "low" | "medium" | "high" | "n/a"
-    reasoning: str
+# Re-export models for existing imports/tests
+__all__ = [
+    "ClassificationResult",
+    "CurriculumRow",
+    "RoutedAction",
+    "classify_message",
+    "should_escalate",
+    "route",
+    "check_cohort_pattern",
+    "handle_message_batch",
+]
 
-
-@dataclass
-class RoutedAction:
-    audience: str          # "mentor" | "coordinator" | "none"
-    recipient: str          # mentor/coordinator id
-    message: str
-    risk_types: list[str] = field(default_factory=list)
-
-
-# ---------------------------------------------------------------------------
-# Step 1 — RTS read (stubbed interface; wire to the real RTS call in Bolt)
-# ---------------------------------------------------------------------------
 
 def fetch_recent_messages(channel: str, learner_id: str, window_messages: int = 10) -> list[dict]:
-    """
-    Stub for the real RTS query. In the live Bolt app this becomes a call to
-    Slack's Real-Time Search API scoped to public cohort channels, filtered to
-    one learner's messages plus a small surrounding window for context.
+    """Sync stub kept for tests. Live scans use agent.pipeline.scan_learner()."""
+    raise NotImplementedError("Use agent.pipeline.scan_learner() for live Slack scans.")
 
-    Expected real shape (per Slack RTS docs): a list of {text, ts, channel} dicts
-    for messages the requesting app/user has access to. Keep this function as the
-    single seam between "live Slack" and "everything else" so the rest of the
-    pipeline is testable without a workspace connection.
-    """
-    raise NotImplementedError("Wire this to the live RTS API call inside Bolt.")
-
-
-# ---------------------------------------------------------------------------
-# Step 2 — Classification (Slack AI / Claude call)
-# ---------------------------------------------------------------------------
 
 def classify_message(
     client: anthropic.Anthropic,
@@ -102,10 +79,7 @@ def classify_message(
     text = "".join(
         block.text for block in response.content if getattr(block, "type", None) == "text"
     )
-    # Classifier is instructed to return strict JSON; strip any stray fencing
-    # defensively in case the model wraps it in ```json fences.
-    cleaned = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-    parsed = json.loads(cleaned)
+    parsed = parse_classifier_response(text)
     return ClassificationResult(
         learner_id=parsed["learner_id"],
         message_excerpt=parsed.get("message_excerpt", ""),
@@ -114,33 +88,6 @@ def classify_message(
         reasoning=parsed.get("reasoning", ""),
     )
 
-
-# ---------------------------------------------------------------------------
-# Step 3 — Curriculum MCP lookup (stubbed interface; wire to real MCP client)
-# ---------------------------------------------------------------------------
-
-def fetch_curriculum_row(learner_id: str) -> CurriculumRow:
-    """
-    Stub for the real MCP read against the cohort_tracker sheet (see
-    curriculum_mcp_schema.md). In the live app this is an MCP tool call, not a
-    direct API call — the Bolt agent framework handles the MCP client wiring;
-    this function is the seam where that result lands.
-    """
-    raise NotImplementedError("Wire this to the live curriculum MCP read.")
-
-
-def fetch_mentor_for_topic(topic: str, fallback_mentor: str) -> str:
-    """
-    Stub for the mentor_strengths MCP read. Returns the best-matched mentor for
-    a topic, falling back to the learner's assigned mentor if no topic-specific
-    match exists yet.
-    """
-    raise NotImplementedError("Wire this to the live mentor_strengths MCP read.")
-
-
-# ---------------------------------------------------------------------------
-# Step 4 — Fusion & routing (pure logic — fully testable, no I/O)
-# ---------------------------------------------------------------------------
 
 def should_escalate(result: ClassificationResult, row: CurriculumRow) -> bool:
     """Step 1 of fusion_routing_logic.md — the gate."""
@@ -154,24 +101,21 @@ def should_escalate(result: ClassificationResult, row: CurriculumRow) -> bool:
 def route(
     result: ClassificationResult,
     row: CurriculumRow,
-    mentor_for_topic_fn=fetch_mentor_for_topic,
+    mentor_for_topic_fn=None,
 ) -> Optional[RoutedAction]:
-    """Step 2 of fusion_routing_logic.md — one routing path per risk type.
+    """Step 2 of fusion_routing_logic.md — one routing path per risk type."""
+    if mentor_for_topic_fn is None:
+        from agent.curriculum import fetch_mentor_for_topic
 
-    If multiple risk types are present, builds one combined coordinator message
-    (Step 3) rather than firing multiple separate alerts, UNLESS the only type
-    present is "academic" alone, which routes to the mentor instead.
-    """
+        mentor_for_topic_fn = fetch_mentor_for_topic
+
     if not should_escalate(result, row):
         return None
 
     types = set(result.risk_types)
 
-    # Pure academic, single type -> mentor path
     if types == {"academic"}:
-        topic = result.message_excerpt  # in production: extract topic via the
-                                         # classifier's reasoning field or a
-                                         # second lightweight extraction call
+        topic = result.message_excerpt
         mentor = mentor_for_topic_fn(topic, row.assigned_mentor)
         message = (
             f"{row.display_name} has asked about {topic} more than once and is "
@@ -179,12 +123,13 @@ def route(
             f"{row.expected_module}. You've helped others with this before — "
             f"might be worth a quick check-in."
         )
-        return RoutedAction(audience="mentor", recipient=mentor, message=message,
-                             risk_types=result.risk_types)
+        return RoutedAction(
+            audience="mentor",
+            recipient=mentor,
+            message=message,
+            risk_types=result.risk_types,
+        )
 
-    # Everything else (overload, confidence, isolation, withdrawal, or any
-    # academic+other combination) routes to the coordinator, combined into one
-    # message per Step 3 of the routing doc.
     fragments = []
     if "overload" in types:
         fragments.append(
@@ -225,20 +170,11 @@ def route(
     )
 
 
-# ---------------------------------------------------------------------------
-# Step 4b — Cohort-level pattern check (the curriculum-quality signal)
-# ---------------------------------------------------------------------------
-
 def check_cohort_pattern(
-    topic_flags_this_week: dict[str, list[str]],  # topic -> [learner_ids]
+    topic_flags_this_week: dict[str, list[str]],
     topic: str,
     threshold: int = 2,
 ) -> Optional[str]:
-    """
-    If 2+ learners have been flagged academic on the same topic in the same
-    window, returns a coordinator message suggesting a group session instead of
-    (or alongside) individual mentor pings. Returns None if below threshold.
-    """
     learners = topic_flags_this_week.get(topic, [])
     if len(learners) >= threshold:
         return (
@@ -249,10 +185,6 @@ def check_cohort_pattern(
     return None
 
 
-# ---------------------------------------------------------------------------
-# Orchestration entry point (called from the Bolt event handler)
-# ---------------------------------------------------------------------------
-
 def handle_message_batch(
     client: anthropic.Anthropic,
     channel: str,
@@ -260,6 +192,8 @@ def handle_message_batch(
     history_context: str,
     current_message: str,
 ) -> Optional[RoutedAction]:
+    from agent.curriculum import fetch_curriculum_row
+
     result = classify_message(client, learner_id, history_context, current_message)
     row = fetch_curriculum_row(learner_id)
     return route(result, row)

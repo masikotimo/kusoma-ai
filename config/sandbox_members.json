@@ -1,0 +1,71 @@
+{
+  "workspace": "HackathonSlackTim",
+  "cohort_channels": ["module-help", "standup", "general"],
+  "log_channel": "kusoma-log",
+  "staff": {
+    "jane": {
+      "slack_user_id": "U0BBZHB3CV7",
+      "display_name": "Jane K. (Coordinator)",
+      "role": "coordinator"
+    },
+    "sam": {
+      "slack_user_id": "U0BBRBDHKDH",
+      "display_name": "Sam M. (Mentor)",
+      "role": "mentor"
+    }
+  },
+  "learners": {
+    "aida": {
+      "slack_user_id": "U0BBUA2QFC5",
+      "display_name": "Aida K.",
+      "aliases": ["aida", "aida k", "aida k.", "aida_k", "Aida K"],
+      "expected_module": 4,
+      "current_module": 2,
+      "last_submission_date": "2026-06-09",
+      "prior_experience": "none",
+      "assigned_mentor": "sam",
+      "coordinator": "jane"
+    },
+    "brian": {
+      "slack_user_id": "U0BBVKNLF0E",
+      "display_name": "Brian O.",
+      "aliases": ["brian", "brian o", "brian o.", "brian_o", "Brian O"],
+      "expected_module": 4,
+      "current_module": 3,
+      "last_submission_date": "2026-06-11",
+      "prior_experience": "some",
+      "assigned_mentor": "sam",
+      "coordinator": "jane"
+    },
+    "carmen": {
+      "slack_user_id": "U0BBXMWT2RY",
+      "display_name": "Carmen R.",
+      "aliases": ["carmen", "carmen r", "carmen r.", "carmen_r", "Carmen R"],
+      "expected_module": 4,
+      "current_module": 4,
+      "last_submission_date": "2026-06-12",
+      "prior_experience": "none",
+      "assigned_mentor": "sam",
+      "coordinator": "jane"
+    },
+    "esther": {
+      "slack_user_id": "U0BCS0Q1S56",
+      "display_name": "Esther N.",
+      "aliases": ["esther", "esther n", "esther n.", "esther_n", "Esther N"],
+      "expected_module": 4,
+      "current_module": 2,
+      "last_submission_date": "2026-05-20",
+      "prior_experience": "none",
+      "assigned_mentor": "sam",
+      "coordinator": "jane"
+    }
+  },
+  "mentor_strengths": [
+    {"mentor": "sam", "topic": "closures", "times_successfully_explained": 3},
+    {"mentor": "sam", "topic": "recursion", "times_successfully_explained": 1}
+  ],
+  "judges": {
+    "slackhack": "U0BBZSALJLR",
+    "testing": "U0BBGH2C9UP"
+  }
+}
